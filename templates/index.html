@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Worker Log Parser</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14"></script>
+    <style>
+        [v-cloak] { display: none; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .upload-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .workflow-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .workflow-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 10px 0;
+        }
+        
+        .stats-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .unrecognized-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        pre {
+            background: #f8f8f8;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        
+        .error {
+            color: red;
+            margin: 10px 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+        }
+
+        .loading {
+            color: #666;
+            margin: 10px 0;
+        }
+
+        .stage {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f8f8;
+            border-radius: 4px;
+        }
+        .status {
+            font-size: 0.8em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 10px;
+        }
+        .status.succeeded {
+            background: #4CAF50;
+            color: white;
+        }
+        .status.failed {
+            background: #f44336;
+            color: white;
+        }
+        .incentive-stage {
+            background: #f0f7ff !important;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .metric {
+            text-align: center;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .metric-label {
+            font-size: 0.8em;
+            color: #666;
+        }
+        .metric-value {
+            font-size: 1.1em;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+        .metric-value.highlight {
+            color: #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container" v-cloak>
+        <div class="upload-section">
+            <h2>Upload Worker Log File</h2>
+            <input type="file" @change="handleFileUpload" accept=".txt,.log">
+            <div v-if="error" class="error" v-text="error"></div>
+            <div v-if="loading">Processing...</div>
+        </div>
+
+        <div v-if="results && results.jobs">
+            <div v-for="job in results.jobs" :key="job.job_id" class="workflow-card">
+                <h3>
+                    <span v-text="'Job ' + job.job_id"></span>
+                    <span class="status" :class="job.status" v-text="job.status"></span>
+                </h3>
+                
+                <div v-if="job.stages.request" class="stage">
+                    <h4>Request</h4>
+                    <div v-if="job.stages.request.query" v-text="'Query: ' + job.stages.request.query"></div>
+                    <div v-text="'Requested Videos: ' + job.stages.request.requested_videos"></div>
+                    <div v-text="'Stake: ' + job.stages.request.stake"></div>
+                </div>
+
+                <div v-if="job.stages.search" class="stage">
+                    <h4>Search</h4>
+                    <div v-text="'Videos Found: ' + job.stages.search.videos_found"></div>
+                    <div v-text="'Duplicates Removed: ' + job.stages.search.duplicates_removed"></div>
+                </div>
+
+                <div v-if="job.stages.download" class="stage">
+                    <h4>Download</h4>
+                    <div v-text="'Downloaded Videos: ' + job.stages.download.downloaded_videos"></div>
+                    <div v-if="job.stages.download.download_time" v-text="'Download Time: ' + job.stages.download.download_time + 's'"></div>
+                </div>
+
+                <div v-if="job.stages.processing" class="stage">
+                    <h4>Processing</h4>
+                    <div v-if="job.stages.processing.embedding_time" v-text="'Embedding Time: ' + job.stages.processing.embedding_time + 's'"></div>
+                </div>
+
+                <div v-if="job.stages.filtering" class="stage">
+                    <h4>Filtering</h4>
+                    <div v-text="'Unique Videos: ' + job.stages.filtering.unique_videos"></div>
+                </div>
+
+                <div v-if="job.results && job.results.final_videos.length" class="stage">
+                    <h4>Final Videos</h4>
+                    <div v-for="video in job.results.final_videos" :key="video.video_id">
+                        <span v-text="video.video_id + ': ' + video.title + ' [' + video.clip + ']'"></span>
+                    </div>
+                </div>
+
+                <div v-if="job.incentive" class="stage incentive-stage">
+                    <h4>Rewards & Metrics</h4>
+                    <div class="metrics-grid">
+                        <div v-if="job.incentive['Emission/day']" class="metric">
+                            <div class="metric-label">Emission/day</div>
+                            <div class="metric-value" v-text="formatNumber(job.incentive['Emission/day'])"></div>
+                        </div>
+                        <div v-if="job.incentive.Stake" class="metric">
+                            <div class="metric-label">Stake</div>
+                            <div class="metric-value" v-text="formatNumber(job.incentive.Stake)"></div>
+                        </div>
+                        <div v-if="job.incentive.Trust" class="metric">
+                            <div class="metric-label">Trust</div>
+                            <div class="metric-value" v-text="formatNumber(job.incentive.Trust)"></div>
+                        </div>
+                        <div v-if="job.incentive.Consensus" class="metric">
+                            <div class="metric-label">Consensus</div>
+                            <div class="metric-value" v-text="formatNumber(job.incentive.Consensus)"></div>
+                        </div>
+                        <div v-if="job.incentive.Incentive" class="metric">
+                            <div class="metric-label">Incentive</div>
+                            <div class="metric-value highlight" v-text="formatNumber(job.incentive.Incentive)"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="job.client_hotkey" class="stage">
+                    <h4>Client Information</h4>
+                    <div v-text="'Client Hotkey: ' + job.client_hotkey"></div>
+                </div>
+
+                <div v-if="job.stages.query_processing" class="stage">
+                    <h4>Query Processing</h4>
+                    <div v-if="job.stages.query_processing.original_query" 
+                         v-text="'Original Query: ' + job.stages.query_processing.original_query">
+                    </div>
+                    <div v-if="job.stages.query_processing.random_topic" 
+                         v-text="'Random Topic: ' + job.stages.query_processing.random_topic">
+                    </div>
+                    <div v-if="job.stages.query_processing.augmented_queries.length">
+                        <div>Augmented Queries:</div>
+                        <ul>
+                            <li v-for="(query, index) in job.stages.query_processing.augmented_queries" 
+                                :key="index" 
+                                v-text="query">
+                            </li>
+                        </ul>
+                    </div>
+                    <div v-if="job.stages.query_processing.augmentation_time" 
+                         v-text="'Augmentation Time: ' + job.stages.query_processing.augmentation_time + 's'">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="results && results.unrecognized_lines && results.unrecognized_lines.length" class="workflow-card">
+            <h3>Unrecognized Lines</h3>
+            <div v-for="(line, index) in results.unrecognized_lines" :key="index">
+                <pre v-text="line"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        new Vue({
+            el: '#app',
+            data: {
+                results: null,
+                error: null,
+                loading: false
+            },
+            computed: {
+                hasWorkflows() {
+                    return this.results?.requests?.length > 0;
+                },
+                hasUnrecognizedLines() {
+                    return this.results?.unrecognized_lines?.length > 0;
+                },
+                unrecognizedLinesCount() {
+                    return this.results?.stats?.unrecognized_lines ?? 0;
+                },
+                hasPatternCoverage() {
+                    return Object.keys(this.results?.stats?.pattern_coverage || {}).length > 0;
+                },
+                hasCategoryCoverage() {
+                    return Object.keys(this.results?.stats?.category_coverage || {}).length > 0;
+                }
+            },
+            methods: {
+                handleFileUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    this.loading = true;
+                    this.error = null;
+                    this.results = null;
+                    
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        this.results = data;
+                        this.loading = false;
+                    })
+                    .catch(error => {
+                        this.error = 'Error processing file: ' + error.message;
+                        this.loading = false;
+                    });
+                },
+                formatCoverage(value) {
+                    return (value || 0).toFixed(1);
+                },
+                getProgressStyle(value) {
+                    return { width: `${value || 0}%` };
+                },
+                formatJson(value) {
+                    return JSON.stringify(value, null, 2);
+                },
+                formatNumber(value) {
+                    if (typeof value !== 'number') return value;
+                    return value.toFixed(4);
+                }
+            }
+        });
+    </script>
+</body>
+</html> 
